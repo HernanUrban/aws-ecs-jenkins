@@ -61,8 +61,7 @@ Parameters:
 
   SubnetsAZ:
     Description: Select the availability zones for the subnet
-    Type: CommaDelimitedList
-    #Type: List<AWS::EC2::AvailabilityZone::Name>
+    Type: List<AWS::EC2::AvailabilityZone::Name>
 
   Environment:
     Description: Environment of the project

@@ -198,12 +198,18 @@ Resources:
 
           EC2_AVAIL_ZONE=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`
 
-          JENKINS_EFS_PATH=$EC2_AVAIL_ZONE.${JenkinsEFS}.efs.${AWS::Region}.amazonaws.com
+          TOOLS_EFS_PATH=$EC2_AVAIL_ZONE.${JenkinsEFS}.efs.${AWS::Region}.amazonaws.com
+          install -d -o 1000 -g 1000 /EFS
+          install -d -o 1000 -g 1000 /EFS/var
+          install -d -o 1000 -g 1000 /EFS/var/jenkins_home
+          install -d -o 1000 -g 1000 /EFS/SonarQube-data
+          install -d -o 1000 -g 1000 /EFS/SonarQube-conf
+          install -d -o 1000 -g 1000 /EFS/SonarQube-extensions
+          install -d -o 1000 -g 1000 /EFS/SonarQube-plugins
+          install -d -o 1000 -g 1000 /EFS/nexus-data
+          install -d -o 1000 -g 1000 /EFS/others
+          mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 TOOLS_EFS_PATH:/ /EFS
 
-          install -d -o 1000 -g 1000 /var/jenkins_home
-          mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 JENKINS_EFS_PATH:/ /var/jenkins_home
-
-          chmod 777 /var/run/docker.sock
 
     Metadata:
       AWS::CloudFormation::Init:
