@@ -19,7 +19,7 @@ RUN apt-get update && \
 	apt-get install -y python python-pip ca-certificates groff less bash grep && \
 	pip --no-cache-dir install awscli==${AWS_CLI_VERSION}
 RUN usermod -aG docker jenkins
-
+RUN groupmod -g 1000 docker
 USER jenkins
 SHELL ["/bin/bash", "-c"]
 ###Additional steps below

@@ -1,100 +1,149 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Creates and deploys over ECS an Nexus service
+Description: Creates and deploys over ECS an SonarQube service
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
     - Label:
-        default: Resource Identification
+        default: 1- Resource Identification
       Parameters:
       - Project
       - Environment
     - Label:
-        default: Network Configuration
+        default: 2- VPC/Network
       Parameters:
       - VpcId
-      - SubnetID
+      - Subnets
+    - Label:
+        default: 3- ECS Cluster
+      Parameters:
+        - ECSCluster
+        - ELBSecurityGroup
+    - Label:
+        default: 4- Sonarqube Container
+      Parameters:
+        - Image
+        - DesiredCount
+        - ContainerCPU
+        - ContainerMemory
+        - ContainerPort
+    - Label:
+        default: 5- (Optional) RDS Database
+      Parameters:
+        - SonarQubeRDSEndpoint
+        - SonarQubeRDSUser
+        - SonarQubeRDSPassword
+
 Parameters:
+
   Project:
-    Description: Name of the project
+    Description: Project name
     Type: String
 
   Environment:
     Description: Environment of the project
     Type: String
-    Default: PROD
+    Default: DEV
     AllowedValues:
     - DEV
-    - PROD
     - QA
+    - UAT
+    - PROD
+
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: Select a VPC that allows instances to access the Internet.
-  SubnetID:
+
+  Subnets:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Select at two subnets in your selected VPC.
+
   ECSCluster:
     Description: Name of ECS Cluster for the task
     Type: String
+
   Image:
     Description: Name of the image
     Type: String
+    Default: "sonarqube:7.1"
+
   ContainerCPU:
     Description: CPU credits for docker container
     Type: Number
+    Default: 1024
+
   ContainerMemory:
     Description: Memory for docker container
     Type: Number
+    Default: 2048
+
   ContainerPort:
     Type: Number
-    Default: 8081
-  ECSSecurityGroup:
+    Default: 9000
+
+  SonarQubeRDSUser:
+    Description: DB Username
+    Type: String
+
+  SonarQubeRDSPassword:
+    Description: DB Password
+    Type: String
+
+  SonarQubeRDSEndpoint:
+    Description: JDBC URL (i.e. jdbc:postgresql://<RDS_ENDPOINT>:5432/sonar)
+    Type: String
+
+  ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup::Id
     Description: ELB Security groups
+
+  DesiredCount:
+    Description: How many instances of this task should we run across our cluster
+    Type: Number
+    Default: 1
 
 Resources:
   CloudwatchLogsGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Ref AWS::StackName
+      LogGroupName:
+        Fn::Join:
+        - "-"
+        - - ECSLogGroup
+          - Ref: Project
+          - SonarQube
       RetentionInDays: 14
 
-  NexusLoadBalancer:
+  SonarQubeLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
     Properties:
-      AccessLoggingPolicy:
-        Enabled: true
-        S3BucketName:
-          Fn::Join:
-          - "-"
-          - - nexus-logs
-            - Ref: AWS::AccountId
       LoadBalancerName:
         Fn::Join:
         - "-"
-        - - Nexus
+        - - SonarQube
           - Ref: Project
           - Ref: Environment
       Subnets:
-        Ref: SubnetID
+        Ref: Subnets
       Scheme: internet-facing
       SecurityGroups:
-      - Ref: ECSSecurityGroup
+      - !Ref ELBSecurityGroup
       Listeners:
-      - InstancePort: '8081'
+      - InstancePort: !Ref ContainerPort
         InstanceProtocol: HTTP
-        LoadBalancerPort: '80'
+        LoadBalancerPort: 80
         Protocol: HTTP
       HealthCheck:
-        HealthyThreshold: '2'
-        Interval: '30'
-        Target: HTTP:8081/
-        Timeout: '20'
-        UnhealthyThreshold: '5'
+        HealthyThreshold: 2
+        Interval: 30
+        Target: HTTP:9000/
+        Timeout: 15
+        UnhealthyThreshold: 5
       Tags:
       - Key: Name
         Value:
           Fn::Join:
           - "-"
-          - - Nexus
+          - - SonarQube
             - Ref: Project
             - Ref: Environment
       - Key: Project
@@ -103,7 +152,7 @@ Resources:
       - Key: Environment
         Value:
           Ref: Environment
-    Type: AWS::ElasticLoadBalancing::LoadBalancer
+
 
   taskdefinition:
     Type: AWS::ECS::TaskDefinition
@@ -111,58 +160,78 @@ Resources:
       Family:
         Fn::Join:
         - "-"
-        - - Nexus
+        - - SonarQube
           - Ref: Project
           - task
       NetworkMode: bridge
       ContainerDefinitions:
-      - Name: Nexus
-        Cpu:
-          Ref: ContainerCPU
+      - Name: SonarQube
+        Cpu: !Ref ContainerCPU
         Essential: true
-        Privileged: true
-        Image:
-          Ref: Image
-        Memory:
-          Ref: ContainerMemory
-        User: root
+        Image: !Ref Image
+        Memory: !Ref ContainerMemory
         LogConfiguration:
           LogDriver: awslogs
           Options:
-            awslogs-group:
-              Ref: CloudwatchLogsGroup
-            awslogs-region:
-              Ref: AWS::Region
-            awslogs-stream-prefix: Nexus
+            awslogs-group: !Ref CloudwatchLogsGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: SonarQube
         MountPoints:
-        - SourceVolume: nexus-data
-          ContainerPath: "/nexus-data"
+        - SourceVolume: SonarQube-data
+          ContainerPath: "/opt/sonarqube/data"
+          ReadOnly: false
+        - SourceVolume: SonarQube-conf
+          ContainerPath: "/opt/sonarqube/conf"
+          ReadOnly: false
+        - SourceVolume: SonarQube-extensions
+          ContainerPath: "/opt/sonarqube/extensions"
+          ReadOnly: false
+        - SourceVolume: SonarQube-plugins
+          ContainerPath: "/opt/sonarqube/lib/bundled-plugins"
           ReadOnly: false
         PortMappings:
         - HostPort: !Ref ContainerPort
           ContainerPort: !Ref ContainerPort
-        - HostPort: 8085
-          ContainerPort: 8085
         Ulimits:
         - HardLimit: 65536
           Name: nofile
           SoftLimit: 65536
+        Environment:
+        - Name: SONARQUBE_JDBC_USERNAME
+          Value:
+            Ref: SonarQubeRDSUser
+        - Name: SONARQUBE_JDBC_PASSWORD
+          Value:
+            Ref: SonarQubeRDSPassword
+        - Name: SONARQUBE_JDBC_URL
+          Value:
+            Ref: SonarQubeRDSEndpoint
       Volumes:
-      - Name: nexus-data
+      - Name: SonarQube-data
         Host:
-          SourcePath: "/EFS/nexus-data/"
+          SourcePath: "/EFS/SonarQube-data/"
+      - Name: SonarQube-conf
+        Host:
+          SourcePath: "/EFS/SonarQube-conf/"
+      - Name: SonarQube-extensions
+        Host:
+          SourcePath: "/EFS/SonarQube-extensions/"
+      - Name: SonarQube-plugins
+        Host:
+          SourcePath: "/EFS/SonarQube-plugins/"
+
   service:
     Type: AWS::ECS::Service
-    DependsOn: NexusLoadBalancer
+    DependsOn: SonarQubeLoadBalancer
     Properties:
       Cluster:
         Ref: ECSCluster
-      DesiredCount: '1'
+      DesiredCount: !Ref DesiredCount
       LoadBalancers:
-      - ContainerName: Nexus
+      - ContainerName: SonarQube
         ContainerPort: !Ref ContainerPort
         LoadBalancerName:
-          Ref: NexusLoadBalancer
+          Ref: SonarQubeLoadBalancer
       Role:
         Ref: ECSServiceRole
       TaskDefinition:
@@ -194,17 +263,18 @@ Resources:
             - ec2:Describe*
             - ec2:AuthorizeSecurityGroupIngress
             Resource: "*"
+
 Outputs:
   ecsservice:
     Value:
       Ref: service
-  NexusLoadBalancer:
+  SonarQubeLoadBalancer:
     Description: Your ALB DNS URL
     Value:
       Fn::Join:
       - ''
       - - Fn::GetAtt:
-          - NexusLoadBalancer
+          - SonarQubeLoadBalancer
           - DNSName
   taskdef:
     Value:
